@@ -2,6 +2,7 @@ package com.inspiredandroid.kai.sandbox
 
 import android.content.Context
 import android.os.Build
+import android.os.Environment
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.inspiredandroid.kai.SandboxSessions
 import com.inspiredandroid.kai.TerminalLine
@@ -191,12 +192,22 @@ class LinuxSandboxManager(
         }
     }
 
+    // External storage path bind-mounted as /sdcard inside proot.
+    // Uses Environment.getExternalStorageDirectory() which returns the primary
+    // shared storage root (typically /storage/emulated/0). May return a path
+    // that is inaccessible under scoped storage on Android 10+ without
+    // MANAGE_EXTERNAL_STORAGE or READ_EXTERNAL_STORAGE permission.
+    val sdcardPath: String? get() = runCatching {
+        Environment.getExternalStorageDirectory().absolutePath
+    }.getOrNull()
+
     fun createProotExecutor(): ProotExecutor = ProotExecutor(
         prootPath = prootPath,
         libDir = sandboxDir.absolutePath,
         rootfsPath = rootfsPath,
         homePath = homePath,
         tmpPath = tmpPath,
+        sdcardPath = sdcardPath,
     )
 
     // One bash session per logical caller (chat conversation, terminal scratch,

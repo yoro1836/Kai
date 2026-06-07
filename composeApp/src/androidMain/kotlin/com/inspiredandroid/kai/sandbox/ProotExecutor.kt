@@ -55,6 +55,7 @@ class ProotExecutor(
     private val rootfsPath: String,
     private val homePath: String,
     private val tmpPath: String,
+    private val sdcardPath: String? = null,
 ) {
 
     fun execute(
@@ -130,18 +131,31 @@ class ProotExecutor(
         return ProotHandle(process, cancelled, listOf(stdoutFuture, stderrFuture))
     }
 
-    private fun buildProcessArgs(command: String, workingDir: String): Array<String> = arrayOf(
-        prootPath,
-        "--rootfs=$rootfsPath",
-        "--bind=/dev",
-        "--bind=/proc",
-        "--bind=/sys",
-        "--bind=$homePath:/root",
-        "--bind=$tmpPath:/tmp",
-        "-0",
-        "-w", workingDir,
-        "/bin/sh", "-c", command,
-    )
+    private fun buildProcessArgs(command: String, workingDir: String): Array<String> {
+        val baseArgs = mutableListOf(
+            prootPath,
+            "--rootfs=$rootfsPath",
+            "--bind=/dev",
+            "--bind=/proc",
+            "--bind=/sys",
+            "--bind=$homePath:/root",
+            "--bind=$tmpPath:/tmp",
+        )
+        // Mount external storage so /sdcard is accessible from inside proot.
+        // The host path is resolved from Environment.getExternalStorageDirectory()
+        // and may be null on devices without external storage or when the path
+        // is unavailable (e.g. some emulators).
+        if (sdcardPath != null && sdcardPath.isNotBlank()) {
+            baseArgs.add("--bind=$sdcardPath:/sdcard")
+        }
+        baseArgs.add("-0")
+        baseArgs.add("-w")
+        baseArgs.add(workingDir)
+        baseArgs.add("/bin/sh")
+        baseArgs.add("-c")
+        baseArgs.add(command)
+        return baseArgs.toTypedArray()
+    }
 
     private fun buildEnvVars(extraEnv: Map<String, String>): Array<String> {
         val loaderPath = File(prootPath).parent.orEmpty() + "/libproot-loader.so"
