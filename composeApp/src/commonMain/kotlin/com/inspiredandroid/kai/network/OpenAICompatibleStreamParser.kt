@@ -53,7 +53,14 @@ class OpenAICompatibleStreamParser(
             val delta = obj["delta"]?.jsonObject ?: continue
             val finishReason = obj["finish_reason"]?.jsonPrimitive?.content
 
-            // Text content
+            // Reasoning / chain-of-thought (DeepSeek R1, etc.) — emitted before content.
+            // These are the model's internal thinking tokens, shown in a collapsible block.
+            val reasoningContent = delta["reasoning_content"]?.jsonPrimitive?.content
+            if (!reasoningContent.isNullOrEmpty()) {
+                onEvent(StreamEvent.ReasoningToken(reasoningContent))
+            }
+
+            // Text content (the final answer)
             val content = delta["content"]?.jsonPrimitive?.content
             if (!content.isNullOrEmpty()) {
                 onEvent(StreamEvent.Token(content))

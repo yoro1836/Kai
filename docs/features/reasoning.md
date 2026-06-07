@@ -1,6 +1,6 @@
 # Reasoning Content Handling
 
-**Last verified:** 2026-05-20
+**Last verified:** 2026-06-07
 
 Reasoning-capable models (DeepSeek R1, GLM thinking, Qwen thinking, Kimi thinking, Magistral, gpt-oss, etc.) return their chain-of-thought separately from the final answer. Kai handles reasoning along two axes: **wire-side** (whether to echo the trace back to the provider on the next request) and **display-side** (whether to show it to the user in the chat UI). When a turn also contains `tool_calls`, some providers require the chain-of-thought to be echoed back to preserve reasoning continuity across the tool round-trip — and others strictly reject the same field. This page documents what each provider does, what Kai sends, and where we trade fidelity for simplicity.
 
@@ -47,7 +47,7 @@ The chain-of-thought is preserved on `History.reasoningContent` regardless of th
 
 The chain-of-thought is always rendered when present. Each assistant bubble with reasoning content prepends a collapsible "Thinking" section above the answer: collapsed by default, the first line of the most recent reasoning segment shown as a preview; expanded reveals the full trace in a dim blockquote. Thinking-only turns (where the model returned reasoning but no answer, typically as a precursor to a tool call) surface as standalone reasoning bubbles while in flight; once the answer arrives, they're absorbed into the answer's grouped section so a multi-tool response shows a single "Thinking" disclosure rather than several.
 
-Reasoning is only visible on messages captured after persistence support landed, and only on the OpenAI-compatible path. Old conversations saved before persistence appear unchanged.
+**Streaming reasoning**: During SSE streaming, `reasoning_content` deltas from OpenAI-compatible providers (DeepSeek R1, etc.) are parsed as `ReasoningToken` events and displayed in real-time. The token arrives in an `isThinking` entry whose `content` grows incrementally; when the first answer token arrives, the accumulated reasoning migrates to the answer entry's `reasoningContent` and the thinking block collapses into the standard collapsible "Thinking" section above the streaming answer. Anthropic and Gemini do not yet emit reasoning tokens in the streaming path.
 
 ## Known gaps
 

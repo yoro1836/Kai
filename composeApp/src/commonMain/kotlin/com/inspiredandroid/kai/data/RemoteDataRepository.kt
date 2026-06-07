@@ -147,14 +147,19 @@ private interface ToolLoopStrategy {
      * Streaming variant of [chat]. The default implementation delegates to the
      * batch [chat] and calls [onToken] once with the full text at completion.
      * Providers that support SSE streaming override this to deliver tokens
-     * incrementally.
+     * incrementally. [onReasoning] receives chain-of-thought tokens when the
+     * model emits them (DeepSeek R1 reasoning_content, etc.).
      */
     suspend fun streamingChat(
         history: List<History>,
         systemPrompt: String?,
         onToken: suspend (String) -> Unit,
+        onReasoning: suspend (String) -> Unit = {},
     ): LoopChatResult {
         val result = chat(history, systemPrompt)
+        if (result.reasoningContent != null) {
+            onReasoning(result.reasoningContent)
+        }
         if (result.textContent.isNotEmpty()) {
             onToken(result.textContent)
         }
@@ -946,6 +951,7 @@ class RemoteDataRepository(
                 history: List<History>,
                 systemPrompt: String?,
                 onToken: suspend (String) -> Unit,
+                onReasoning: suspend (String) -> Unit,
             ): LoopChatResult {
                 val acc = StreamAccumulator()
                 val msgs = trimMessagesForContext(buildOpenAIMessages(service, history, systemPrompt, declaredToolNames), contextWindowTokens)
@@ -957,6 +963,10 @@ class RemoteDataRepository(
                         tools = tools,
                     ) { event ->
                         when (event) {
+                            is StreamEvent.ReasoningToken -> {
+                                acc.appendReasoning(event.text)
+                                onReasoning(event.text)
+                            }
                             is StreamEvent.Token -> {
                                 acc.appendToken(event.text)
                                 onToken(event.text)
@@ -984,7 +994,12 @@ class RemoteDataRepository(
                         }
                     }
                 }
-                return LoopChatResult(textContent = textContent, toolCalls = calls)
+                return LoopChatResult(
+                    textContent = textContent,
+                    reasoningContent = result.reasoning,
+                    isThinkingContent = result.reasoning != null && textContent.isEmpty(),
+                    toolCalls = calls,
+                )
             }
         }
         return runToolLoop(strategy, systemPrompt, history)
@@ -1097,6 +1112,7 @@ class RemoteDataRepository(
                 history: List<History>,
                 systemPrompt: String?,
                 onToken: suspend (String) -> Unit,
+                onReasoning: suspend (String) -> Unit,
             ): LoopChatResult {
                 val acc = StreamAccumulator()
                 try {
@@ -1107,6 +1123,10 @@ class RemoteDataRepository(
                         systemInstruction = systemPrompt,
                     ) { event ->
                         when (event) {
+                            is StreamEvent.ReasoningToken -> {
+                                acc.appendReasoning(event.text)
+                                onReasoning(event.text)
+                            }
                             is StreamEvent.Token -> {
                                 acc.appendToken(event.text)
                                 onToken(event.text)
@@ -1122,7 +1142,12 @@ class RemoteDataRepository(
                     return chat(history, systemPrompt)
                 }
                 val result = acc.build()
-                return LoopChatResult(textContent = result.text, toolCalls = result.toolCalls)
+                return LoopChatResult(
+                    textContent = result.text,
+                    reasoningContent = result.reasoning,
+                    isThinkingContent = result.reasoning != null && result.text.isEmpty(),
+                    toolCalls = result.toolCalls,
+                )
             }
 
             override fun trimAfterToolResults(history: List<History>, systemPrompt: String?): List<History> = trimHistoryForContext(history, systemPrompt?.length ?: 0, contextWindowTokens)
@@ -1158,30 +1183,54 @@ class RemoteDataRepository(
             val result = strategy.streamingChat(
                 history = visible,
                 systemPrompt = systemPrompt,
-            ) { token ->
-                // Update the placeholder content with each incoming token so the
-                // UI renders the response as it is generated.
-                history.update { h ->
-                    h.map { entry ->
-                        if (entry.id == placeholderId) {
-                            entry.copy(content = entry.content + token)
-                        } else {
-                            entry
+                onToken = { token ->
+                    // Append answer token to content; clear isThinking so the
+                    // entry renders as a normal answer bubble from this point on.
+                    history.update { h ->
+                        h.map { entry ->
+                            if (entry.id == placeholderId) {
+                                entry.copy(
+                                    content = entry.content + token,
+                                    isThinking = false,
+                                )
+                            } else {
+                                entry
+                            }
                         }
                     }
-                }
-            }
+                },
+                onReasoning = { reasoningToken ->
+                    // Append reasoning token to both content (so ChatScreen
+                    // renders it during the thinking phase) and reasoningContent
+                    // (so it ends up in the collapsible blockquote after the
+                    // answer arrives). isThinking=true signals ChatScreen to
+                    // show a thinking bubble.
+                    history.update { h ->
+                        h.map { entry ->
+                            if (entry.id == placeholderId) {
+                                entry.copy(
+                                    content = entry.content + reasoningToken,
+                                    isThinking = true,
+                                    reasoningContent = (entry.reasoningContent ?: "") + reasoningToken,
+                                )
+                            } else {
+                                entry
+                            }
+                        }
+                    }
+                },
+            )
 
             if (result.toolCalls.isEmpty()) {
-                // Final answer — placeholder already has the streamed content.
-                // Update reasoning/isThinking metadata on the placeholder and
-                // signal that askInternal should not add a duplicate entry.
+                // Final answer — placeholder already has streamed content and
+                // reasoningContent. Finalize with result metadata.
                 history.update { h ->
                     h.map { entry ->
                         if (entry.id == placeholderId) {
                             entry.copy(
                                 isThinking = result.isThinkingContent,
-                                reasoningContent = result.reasoningContent,
+                                reasoningContent = result.reasoningContent
+                                    ?: entry.reasoningContent,
                             )
                         } else {
                             entry

@@ -7,7 +7,10 @@ import com.inspiredandroid.kai.ui.chat.ToolCallInfo
  * stream by collecting these events and updating the UI incrementally.
  */
 sealed class StreamEvent {
-    /** A text token from the assistant. */
+    /** A reasoning / chain-of-thought token from the assistant (thinking phase). */
+    data class ReasoningToken(val text: String) : StreamEvent()
+
+    /** A text token from the assistant (answer phase). */
     data class Token(val text: String) : StreamEvent()
 
     /** A completed tool call extracted from the stream. */
@@ -23,10 +26,15 @@ sealed class StreamEvent {
 /** Accumulates streaming state into a completed [StreamResult]. */
 class StreamAccumulator {
     val textBuilder = StringBuilder()
+    val reasoningBuilder = StringBuilder()
     val toolCalls = mutableListOf<ToolCallInfo>()
 
     fun appendToken(text: String) {
         textBuilder.append(text)
+    }
+
+    fun appendReasoning(text: String) {
+        reasoningBuilder.append(text)
     }
 
     fun appendToolCalls(calls: List<ToolCallInfo>) {
@@ -35,11 +43,13 @@ class StreamAccumulator {
 
     fun build(): StreamResult = StreamResult(
         text = textBuilder.toString(),
+        reasoning = reasoningBuilder.toString().ifEmpty { null },
         toolCalls = toolCalls.toList(),
     )
 }
 
 data class StreamResult(
     val text: String,
+    val reasoning: String? = null,
     val toolCalls: List<ToolCallInfo>,
 )
