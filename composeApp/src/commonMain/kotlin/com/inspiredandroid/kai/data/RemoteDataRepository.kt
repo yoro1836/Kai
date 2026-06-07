@@ -1184,13 +1184,15 @@ class RemoteDataRepository(
                 history = visible,
                 systemPrompt = systemPrompt,
                 onToken = { token ->
-                    // Append answer token to content; clear isThinking so the
-                    // entry renders as a normal answer bubble from this point on.
+                    // First answer token after reasoning: reset content so the
+                    // reasoning text (temporarily held in content for the thinking
+                    // bubble) doesn't leak into the final answer. Reasoning is
+                    // already stored in reasoningContent. Subsequent tokens append.
                     history.update { h ->
                         h.map { entry ->
                             if (entry.id == placeholderId) {
                                 entry.copy(
-                                    content = entry.content + token,
+                                    content = if (entry.isThinking) token else entry.content + token,
                                     isThinking = false,
                                 )
                             } else {
